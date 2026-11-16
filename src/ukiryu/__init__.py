@@ -14,6 +14,10 @@ from .api import (
     find_version_spec,
     fully_validate,
     library_info,
+    lint_string,
+    load_model,
+    model_to_yaml,
+    safe_load,
     validate_definition,
     validate_profile,
     validate_type,
@@ -35,8 +39,9 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Register", "Shell", "Tool", "core_version", "extract_version", "find_version_spec",
-    "fully_validate", "library_info", "validate_definition", "validate_profile",
-    "validate_type", "version_range_matches",
+    "fully_validate", "library_info", "lint_string", "load_model", "model_to_yaml",
+    "safe_load", "validate_definition", "validate_profile", "validate_type",
+    "version_range_matches",
     "LibraryLoadError", "ProtocolError", "UkiryuError",
     "BuiltCommand", "CommandInfo", "CoreVersion", "DefinitionReport", "ExecutionResult",
     "SchemaStage", "ToolInfo",
