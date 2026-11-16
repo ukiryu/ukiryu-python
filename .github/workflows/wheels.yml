@@ -1,7 +1,8 @@
 name: Wheels
 
 # Per-platform wheels that carry the pinned ukiryu-rs C library, installed
-# into clean environments and run against the conformance corpus. Nothing is
+# into clean environments (in the same job, so one slow runner type does not
+# hold the others back) and run against the conformance corpus. Nothing is
 # published: the wheels are workflow artifacts only.
 
 on:
@@ -22,9 +23,9 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.name }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -109,79 +110,31 @@ jobs:
           mkdir -p evidence
           python scripts/check_wheel.py dist/*.whl "${{ matrix.plat }}" evidence/wheel.json
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: wheel-${{ matrix.name }}
           path: |
             dist/*.whl
             evidence/wheel.json
           if-no-files-found: error
-
-  install-test:
-    name: Install ${{ matrix.target.name }} (Python ${{ matrix.python }})
-    needs: build
-    runs-on: ${{ matrix.target.runner }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - {name: linux-x86_64, runner: ubuntu-24.04}
-          - {name: linux-aarch64, runner: ubuntu-24.04-arm}
-          - {name: macos-arm64, runner: macos-15}
-          - {name: macos-x86_64, runner: macos-15-intel}
-          - {name: windows-x86_64, runner: windows-2022}
-        python: ['3.9', '3.13']
-    steps:
-      - uses: actions/checkout@v4
+      - name: Install and test on Python 3.9
+        uses: ./.github/actions/install-test
         with:
-          submodules: true
-      - uses: actions/setup-python@v5
+          python: '3.9'
+      - name: Install and test on Python 3.13
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/install-test
         with:
-          python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheel-${{ matrix.target.name }}
-          path: artifact
-      - name: Install the wheel into a clean environment
-        shell: bash
-        run: |
-          python -m venv "$RUNNER_TEMP/clean"
-          if [ "$RUNNER_OS" = Windows ]; then py="$RUNNER_TEMP/clean/Scripts/python.exe"; else py="$RUNNER_TEMP/clean/bin/python"; fi
-          echo "PY=$py" >> "$GITHUB_ENV"
-          "$py" -m pip install --no-index --no-deps artifact/dist/*.whl
-          "$py" -m pip list
-          # The tests run from a copy outside the checkout, so the source tree cannot be imported.
-          mkdir "$RUNNER_TEMP/run"
-          cp -r tests "$RUNNER_TEMP/run/tests"
-      - name: Installed-wheel checks
-        shell: bash
-        working-directory: ${{ runner.temp }}/run
-        env:
-          UKIRYU_WHEEL_EVIDENCE: ${{ github.workspace }}/artifact/evidence/wheel.json
-        run: '"$PY" -I -m unittest discover -s tests/wheel -v'
-      - name: Binding tests against the installed wheel
-        shell: bash
-        working-directory: ${{ runner.temp }}/run
-        run: '"$PY" -I -m unittest discover -s tests -p "test_[vae]*.py" -v'
-      - name: Conformance corpus against the installed wheel
-        shell: bash
-        working-directory: ${{ runner.temp }}/run
-        env:
-          CI: 'true'
-          UKIRYU_CONFORMANCE_DIR: ${{ github.workspace }}/ukiryu-rs/corpus/conformance
-          UKIRYU_CORPUS_REPORT: ${{ github.workspace }}/corpus-report.json
-        run: '"$PY" -I -m unittest discover -s tests -p "test_corpus.py" -v'
+          python: '3.13'
       - name: Corpus on the manylinux glibc baseline
-        if: startsWith(matrix.target.name, 'linux') && matrix.python == '3.9'
+        if: ${{ !cancelled() && matrix.container }}
         shell: bash
         run: |
-          image=quay.io/pypa/manylinux_2_28_$(uname -m)
+          image="${{ matrix.container }}"
           docker run --rm -v "$GITHUB_WORKSPACE:/w" -e CI=true \
-            -e UKIRYU_WHEEL_EVIDENCE=/w/artifact/evidence/wheel.json \
+            -e UKIRYU_WHEEL_EVIDENCE=/w/evidence/wheel.json \
             -e UKIRYU_CONFORMANCE_DIR=/w/ukiryu-rs/corpus/conformance "$image" bash -euxo pipefail -c '
               /opt/python/cp39-cp39/bin/python -m venv /tmp/clean
-              /tmp/clean/bin/python -m pip install --no-index --no-deps /w/artifact/dist/*.whl
+              /tmp/clean/bin/python -m pip install --no-index --no-deps /w/dist/*.whl
               mkdir /tmp/run && cp -r /w/tests /tmp/run/tests && cd /tmp/run
               ldd --version | head -1
               /tmp/clean/bin/python -I -m unittest discover -s tests/wheel -v
@@ -190,6 +143,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: corpus-report-${{ matrix.target.name }}-py${{ matrix.python }}
-          path: corpus-report.json
+          name: corpus-report-${{ matrix.name }}
+          path: corpus-report-*.json
           if-no-files-found: warn
+

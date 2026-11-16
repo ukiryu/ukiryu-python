@@ -1,0 +1,47 @@
+name: Install the wheel and run the tests
+description: >
+  Installs the built wheel into a clean virtual environment for one Python and
+  runs the installed-wheel checks, the binding tests and the conformance corpus
+  from a copy of tests/ outside the checkout, with python -I.
+inputs:
+  python:
+    description: Python version
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python }}
+    - name: Install the wheel into a clean environment
+      shell: bash
+      run: |
+        env="$RUNNER_TEMP/clean-${{ inputs.python }}"
+        python -m venv "$env"
+        if [ "$RUNNER_OS" = Windows ]; then py="$env/Scripts/python.exe"; else py="$env/bin/python"; fi
+        echo "PY=$py" >> "$GITHUB_ENV"
+        "$py" -m pip install --no-index --no-deps "$GITHUB_WORKSPACE"/dist/*.whl
+        "$py" -m pip list
+        # Tests run from a copy outside the checkout so the source tree cannot be imported.
+        rm -rf "$RUNNER_TEMP/run" && mkdir "$RUNNER_TEMP/run"
+        cp -r tests "$RUNNER_TEMP/run/tests"
+    - name: Installed-wheel checks
+      shell: bash
+      working-directory: ${{ runner.temp }}/run
+      env:
+        UKIRYU_WHEEL_EVIDENCE: ${{ github.workspace }}/evidence/wheel.json
+      run: '"$PY" -I -m unittest discover -s tests/wheel -v'
+    - name: Binding tests against the installed wheel
+      if: ${{ !cancelled() }}
+      shell: bash
+      working-directory: ${{ runner.temp }}/run
+      run: '"$PY" -I -m unittest discover -s tests -p "test_[vae]*.py" -v'
+    - name: Conformance corpus against the installed wheel
+      if: ${{ !cancelled() }}
+      shell: bash
+      working-directory: ${{ runner.temp }}/run
+      env:
+        CI: 'true'
+        UKIRYU_CONFORMANCE_DIR: ${{ github.workspace }}/ukiryu-rs/corpus/conformance
+        UKIRYU_CORPUS_REPORT: ${{ github.workspace }}/corpus-report-${{ inputs.python }}.json
+      run: '"$PY" -I -m unittest discover -s tests -p "test_corpus.py" -v'
