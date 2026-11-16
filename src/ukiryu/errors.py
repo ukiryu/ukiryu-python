@@ -20,17 +20,21 @@ class UkiryuError(Exception):
 
     ``result`` is the :class:`ukiryu.ExecutionResult` of a finished run that
     failed (``EXECUTION_FAILED`` and invalid output encodings), and
-    ``timeout`` the configured timeout of a run that timed out.
+    ``timeout`` the configured timeout of a run that timed out. ``detail``
+    holds structured failure facts the core adds for some operations (for a
+    YAML reader failure, its ``category`` and ``stage``), else ``None``.
     """
 
     def __init__(self, code: str, message: str, source_class: Optional[str] = None,
-                 result: Any = None, timeout: Any = None) -> None:
+                 result: Any = None, timeout: Any = None,
+                 detail: Optional[dict] = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.source_class = source_class
         self.result = result
         self.timeout = timeout
+        self.detail = detail
 
     def __str__(self) -> str:
         origin = " (%s)" % self.source_class if self.source_class else ""

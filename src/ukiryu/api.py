@@ -61,6 +61,7 @@ def _call(request: Dict[str, Any]) -> Dict[str, Any]:
         error.get("source_class"),
         ExecutionResult.from_wire(result) if result is not None else None,
         decode(error["timeout"]) if "timeout" in error else None,
+        error.get("detail"),
     )
 
 
