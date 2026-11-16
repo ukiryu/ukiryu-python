@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+        python: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ukiryu-rs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build the pinned core C library
+        shell: bash
+        working-directory: ukiryu-rs
+        run: cargo build -p ukiryu-ffi --release --locked
+      - name: Locate the library and the corpus
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) lib=libukiryu_ffi.so ;;
+            macOS) lib=libukiryu_ffi.dylib ;;
+            Windows) lib=ukiryu_ffi.dll ;;
+          esac
+          path="$GITHUB_WORKSPACE/ukiryu-rs/target/release/$lib"
+          test -f "$path"
+          echo "UKIRYU_CDYLIB=$path" >> "$GITHUB_ENV"
+          echo "UKIRYU_CONFORMANCE_DIR=$GITHUB_WORKSPACE/ukiryu-rs/corpus/conformance" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/src" >> "$GITHUB_ENV"
+      - name: Record engine provenance
+        shell: bash
+        run: python scripts/engine_provenance.py provenance.json
+      - name: Tests
+        shell: bash
+        env:
+          UKIRYU_CORPUS_REPORT: corpus-report.json
+        run: python -m unittest discover -s tests -v
+      - name: Upload provenance and corpus report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            provenance.json
+            corpus-report.json
+          if-no-files-found: warn
