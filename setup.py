@@ -9,15 +9,18 @@ wheel is built; there is no sdist.
 
 import os
 
-from setuptools import setup
+from setuptools import Distribution, setup
 from setuptools.command.bdist_wheel import bdist_wheel
 
 
-class PlatformWheel(bdist_wheel):
-    def finalize_options(self):
-        super().finalize_options()
-        self.root_is_pure = False
+class BinaryDistribution(Distribution):
+    """Declares platform content so the package lands in platlib, not purelib."""
 
+    def has_ext_modules(self):
+        return True
+
+
+class PlatformWheel(bdist_wheel):
     def get_tag(self):
         plat = os.environ.get("UKIRYU_WHEEL_PLAT")
         if not plat:
@@ -25,4 +28,4 @@ class PlatformWheel(bdist_wheel):
         return "py3", "none", plat.replace("-", "_").replace(".", "_")
 
 
-setup(cmdclass={"bdist_wheel": PlatformWheel})
+setup(distclass=BinaryDistribution, cmdclass={"bdist_wheel": PlatformWheel})

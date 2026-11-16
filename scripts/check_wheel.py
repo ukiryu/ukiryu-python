@@ -84,8 +84,8 @@ def main() -> int:
             limit = (int(m.group(1)), int(m.group(2)))
             floor = glibc_floor(lib)
             detail["max_glibc_symbol"] = "%d.%d" % floor
-            detail["auditwheel"] = subprocess.run(["auditwheel", "show", str(wheel)],
-                                                  capture_output=True, text=True).stdout
+            detail["auditwheel"] = (lambda r: r.stdout + r.stderr)(subprocess.run(
+                ["auditwheel", "show", str(wheel)], capture_output=True, text=True))
             if floor > limit:
                 problems.append("library needs GLIBC %d.%d, tag allows %d.%d" % (floor + limit))
         elif tag.startswith("macosx"):
