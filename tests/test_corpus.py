@@ -44,15 +44,15 @@ DISPATCHED = {
     "shell.join": 664,
     "shell.needs_quoting": 3912,
     "shell.quote": 3912,
+    "lint.string": 70,
+    "yaml.load": 81,
+    "yaml.model_load": 62,
+    "yaml.lutaml_roundtrip": 2,
 }
 
-# Ops with no wire operation in ABI version 1, so no binding can run them.
+# Ops this test does not run, with the reason.
 NOT_DISPATCHED = {
     "resolve.shell_detect": (17, "host shell detection is not on the wire (owner decision D2 open)"),
-    "lint.string": (70, "no lint operation on the wire"),
-    "yaml.load": (81, "YAML loading is internal to the core; no yaml operation on the wire"),
-    "yaml.model_load": (62, "YAML loading is internal to the core; no yaml operation on the wire"),
-    "yaml.lutaml_roundtrip": (2, "YAML loading is internal to the core; no yaml operation on the wire"),
     "cli.run": (21, "CLI process rows belong to the CLI binary, not the library API"),
 }
 
@@ -158,6 +158,17 @@ class Corpus:
         if op == "resolve.version_spec":
             index = self.read_input("register/tools/%s/index.yaml" % i["tool"])
             return ukiryu.find_version_spec(index, i["implementation"], i["version"])
+        if op == "lint.string":
+            return ukiryu.lint_string(self.document(i))
+        if op == "yaml.load":
+            return ukiryu.safe_load(self.document(i))
+        if op == "yaml.model_load":
+            return ukiryu.load_model(i["model"], self.input_path(i["file"]))
+        if op == "yaml.lutaml_roundtrip":
+            # emitted = from_yaml(text).to_yaml; from_yaml(emitted).to_yaml == emitted
+            emitted = ukiryu.model_to_yaml(i["model"], self.document(i))
+            return {"emitted": emitted,
+                    "reparsed_equal": ukiryu.model_to_yaml(i["model"], emitted) == emitted}
         if op.startswith("shell."):
             args = dict(i)
             shell = Shell(args.pop("shell"))
@@ -227,7 +238,7 @@ class ConformanceCorpus(unittest.TestCase):
                 failures.append("%s:\n  got  %r\n  want %r" % (row["id"], have, want))
         self.assertEqual(dict(dispatched), DISPATCHED)
         total = sum(dispatched.values())
-        self.assertEqual(total, 13924)
+        self.assertEqual(total, 14139)
         report = os.environ.get("UKIRYU_CORPUS_REPORT")
         if report:
             Path(report).write_text(json.dumps({

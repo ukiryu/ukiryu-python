@@ -260,3 +260,30 @@ def fully_validate(profile_yaml: str, schema_yaml: str, strict: bool = False) ->
     """``JSON::Validator.fully_validate`` of a profile against a schema document."""
     return decode(_value({"op": "schema", "method": "fully_validate", "profile": profile_yaml,
                           "schema": schema_yaml, "strict": strict}))
+
+
+def lint_string(yaml: str) -> Map:
+    """``DefinitionLinter.lint_string(yaml).to_h``: a Symbol-keyed ``Map``."""
+    return decode(_value({"op": "lint", "method": "string", "yaml": yaml}))
+
+
+def safe_load(yaml: str) -> Any:
+    """``YAML.safe_load(yaml, permitted_classes: [Symbol, Date, Time])``.
+
+    Ruby types survive: Symbols, Floats and non-String keys (as a ``Map``).
+    """
+    return decode(_value({"op": "yaml", "method": "safe_load", "yaml": yaml}))
+
+
+def load_model(model: str, path: PathLike) -> Dict[str, Any]:
+    """``Ukiryu::Models::<model>.from_yaml(path)`` for ``Interface``,
+    ``ImplementationVersion`` or ``ImplementationIndex``: the object's
+    ``class`` name and its ``ivars`` sorted by name."""
+    return decode(_value({"op": "yaml", "method": "model_load", "model": model,
+                          "path": os.fspath(path)}))
+
+
+def model_to_yaml(model: str, yaml: str) -> str:
+    """``Ukiryu::Models::<model>.from_yaml(yaml).to_yaml`` (``ToolDefinition``)."""
+    return decode(_value({"op": "yaml", "method": "model_to_yaml", "model": model,
+                          "yaml": yaml}))
