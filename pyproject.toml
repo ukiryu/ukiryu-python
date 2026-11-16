@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# The name, version and Python floor below are what the repository already
+# uses (src/ukiryu/__init__.py and the CI matrix). They are build inputs for
+# the wheel gate and are not a ratified release contract: the package
+# metadata is an owner decision and nothing here is published.
+[project]
+name = "ukiryu"
+dynamic = ["version"]
+requires-python = ">=3.9"
+description = "Python binding for the Ukiryu core, over its C ABI."
+readme = "README.md"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["ukiryu"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+ukiryu = ["lib/*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "ukiryu.__version__"}
