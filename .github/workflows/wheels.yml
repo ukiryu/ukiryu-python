@@ -136,7 +136,7 @@ jobs:
               /opt/python/cp39-cp39/bin/python -m venv /tmp/clean
               /tmp/clean/bin/python -m pip install --no-index --no-deps /w/dist/*.whl
               mkdir /tmp/run && cp -r /w/tests /tmp/run/tests && cd /tmp/run
-              ldd --version | head -1
+              ldd --version | sed -n 1p
               /tmp/clean/bin/python -I -m unittest discover -s tests/wheel -v
               /tmp/clean/bin/python -I -m unittest discover -s tests -p "test_corpus.py" -v
             '
