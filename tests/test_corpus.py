@@ -68,7 +68,7 @@ MANIFEST_TOTAL = 14177
 # among them. Other listed rows (the schema and shell detection migrations)
 # are not applied by this test and keep their frozen expectations.
 R2_RULE_OPS = ("lint.string", "yaml.load", "yaml.model_load", "yaml.lutaml_roundtrip")
-R2_RULE_ROWS = 27
+R2_RULE_ROWS = 25
 
 
 def corpus_dir() -> Path:
