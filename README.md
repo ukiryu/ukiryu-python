@@ -58,3 +58,18 @@ PYTHONPATH=src python -m unittest discover -s tests
 
 The corpus test runs the shared conformance corpus through the public Python
 API and pins how many rows each operation runs.
+
+## Platform wheels
+
+`.github/workflows/wheels.yml` builds one wheel per platform, each carrying
+the pinned core's C library at `ukiryu/lib/`: Linux x86_64 and aarch64 (built
+in a manylinux_2_28 image), macOS arm64 and x86_64, and Windows x86_64. The
+wheels are tagged `py3-none-<platform>`; there is no sdist and nothing is
+published. `scripts/check_wheel.py` checks the library's glibc, macOS
+deployment or Windows import baseline from the binary and records the wheel,
+library and core hashes. Each wheel is then installed into a clean
+environment, outside the source tree, and runs the binding tests and the
+conformance corpus against the installed package.
+
+The package name, version and Python floor in `pyproject.toml` are the values
+the repository already uses; they are not a ratified release contract.
