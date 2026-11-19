@@ -2,20 +2,23 @@ name: Wheels
 
 # Per-platform wheels that carry the pinned ukiryu-rs C library, installed
 # into clean environments (in the same job, so one slow runner type does not
-# hold the others back) and run against the conformance corpus. Nothing is
-# published: the wheels are workflow artifacts only.
+# hold the others back) and run against the conformance corpus. This workflow
+# publishes nothing: the wheels are workflow artifacts only. publish.yml calls
+# it and uploads those same artifacts.
 
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: wheels-${{ github.ref }}
+  # The workflow name keeps a publish.yml call apart from push and PR runs.
+  group: wheels-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

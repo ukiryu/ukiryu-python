@@ -1,0 +1,139 @@
+name: Publish to PyPI
+
+# Owner-gated release of the wheels built by wheels.yml. It runs only when
+# started by hand (workflow_dispatch) from main, never on a pull request or a
+# push.
+#
+# Owner setup before the first run:
+# - A GitHub environment named `pypi` with required reviewers. The gate job
+#   checks this and stops the run if the environment has no required
+#   reviewers, because GitHub would otherwise create the environment without
+#   protection on first use.
+# - A trusted publisher on pypi.org: project `ukiryu`, owner `ukiryu`,
+#   repository `ukiryu-python`, workflow `publish.yml`, environment `pypi`.
+#   Uploads use OIDC, so there is no API token.
+#
+# Wheels only, as in parsanol-python: an sdist would carry no core library
+# (ukiryu-rs is a submodule), so a source install could not load it. Each
+# platform wheel carries the C library built from the pinned ukiryu-rs.
+#
+# The audit job installs the published release from PyPI on each platform
+# and runs the binding tests and the conformance corpus against it.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Owner gate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: The pypi environment requires reviewers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/pypi" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0') || {
+            echo "::error::environment pypi not found; create it with required reviewers first"
+            exit 1
+          }
+          if [ "$rules" -lt 1 ]; then
+            echo "::error::environment pypi has no required reviewers"
+            exit 1
+          fi
+          echo "pypi environment has $rules required reviewer(s)"
+
+  wheels:
+    needs: gate
+    uses: ./.github/workflows/wheels.yml
+
+  publish:
+    needs: wheels
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: artifacts
+      - name: Collect the five platform wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp artifacts/*/dist/*.whl dist/
+          ls -l dist
+          want=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/ukiryu/__init__.py)
+          count=0
+          for wheel in dist/*.whl; do
+            name=$(basename "$wheel")
+            case "$name" in
+              "ukiryu-$want-"*) count=$((count + 1)) ;;
+              *) echo "::error::$name is not version $want"; exit 1 ;;
+            esac
+          done
+          if [ "$count" -ne 5 ]; then
+            echo "::error::expected 5 wheels, found $count"
+            exit 1
+          fi
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  audit:
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install the published release from PyPI
+        shell: bash
+        # The CDN can lag the upload by a few seconds, so retry.
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/ukiryu/__init__.py)
+          python -m venv "$RUNNER_TEMP/clean"
+          if [ "$RUNNER_OS" = Windows ]; then py="$RUNNER_TEMP/clean/Scripts/python.exe"; else py="$RUNNER_TEMP/clean/bin/python"; fi
+          echo "PY=$py" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 12); do
+            "$py" -m pip install --no-cache-dir --only-binary=:all: "ukiryu==$want" && break
+            if [ "$attempt" -eq 12 ]; then exit 1; fi
+            echo "attempt $attempt: not visible yet; retrying"
+            sleep 15
+          done
+          rm -rf "$RUNNER_TEMP/run" && mkdir "$RUNNER_TEMP/run"
+          cp -r tests "$RUNNER_TEMP/run/tests"
+          "$py" -I -c "import ukiryu; assert ukiryu.__version__ == '$want', ukiryu.__version__; print('audited ukiryu', ukiryu.__version__)"
+      - name: Binding tests against the published wheel
+        shell: bash
+        working-directory: ${{ runner.temp }}/run
+        run: '"$PY" -I -m unittest discover -s tests -p "test_[vae]*.py" -v'
+      - name: Conformance corpus against the published wheel
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ runner.temp }}/run
+        env:
+          CI: 'true'
+          UKIRYU_CONFORMANCE_DIR: ${{ github.workspace }}/ukiryu-rs/corpus/conformance
+        run: '"$PY" -I -m unittest discover -s tests -p "test_corpus.py" -v'
