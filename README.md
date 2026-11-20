@@ -57,7 +57,11 @@ PYTHONPATH=src python -m unittest discover -s tests
 ```
 
 The corpus test runs the shared conformance corpus through the public Python
-API and pins how many rows each operation runs.
+API and pins all 14,177 rows, with no excluded operations. Shell detection
+uses an explicit platform/environment. The 21 deterministic CLI rows use a
+read-only snapshot of the corpus inputs on every host; they never execute
+commands or inspect the host filesystem. `detect_shell` and `render_cli`
+expose those core operations as thin Python calls.
 
 ## Platform wheels
 

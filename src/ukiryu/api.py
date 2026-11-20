@@ -19,6 +19,8 @@ from .values import Map, decode, encode
 __all__ = [
     "core_version",
     "library_info",
+    "detect_shell",
+    "render_cli",
     "Register",
     "Tool",
     "Shell",
@@ -81,6 +83,28 @@ def core_version() -> CoreVersion:
 def library_info() -> _ffi.LibraryInfo:
     """Where the loaded ukiryu-ffi library came from."""
     return _ffi.library().info
+
+
+def detect_shell(*, platform: str, env: Mapping[str, Optional[str]]) -> Dict[str, Any]:
+    """Detect from the explicit platform/environment without reading host state.
+
+    The result contains ``detect`` (a :class:`Symbol`) and ``shell_class``.
+    Unknown shells retain the core's error and structured diagnostic.
+    """
+    return decode(_value({"op": "resolve", "method": "shell_detect",
+                          "platform": platform, "env": dict(env)}))
+
+
+def render_cli(argv: Iterable[str], *, platform: str, env: Mapping[str, str],
+               snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+    """Render CLI stdout/stderr/exit from an explicit read-only input snapshot.
+
+    ``snapshot`` supplies ``files`` (virtual path to text), ``executables``,
+    ``probes`` and ``definitions``. No host files, environment or processes
+    are used; side-effecting CLI commands are refused by the core.
+    """
+    return _value({"op": "cli.run", "argv": list(argv), "platform": platform,
+                   "env": dict(env), "snapshot": dict(snapshot)})
 
 
 class Tool:
