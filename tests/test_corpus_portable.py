@@ -72,3 +72,23 @@ class PortableCorpus(unittest.TestCase):
         corpus.manifest["inputs"][0]["sha256"] = "0" * 64
         with self.assertRaisesRegex(AssertionError, "CLI input digest differs"):
             corpus.cli_snapshot()
+
+    def test_cli_schema_resources_are_refused_on_every_host(self):
+        profile = "/snapshot/inputs/profiles/inkscape_1.0.yaml"
+        schema = "/snapshot/inputs/external-schema/tool.schema.yaml"
+        original = copy.deepcopy(self.corpus.cli_snapshot())
+        original["files"][schema] = "type: object\n"
+        argv = ["validate", "file", profile, "--schema", schema]
+        control = ukiryu.render_cli(argv, platform="linux", env={}, snapshot=original)
+        self.assertIn("exit", control)
+        for reference in (r"file://D:\a\ukiryu-rs\ukiryu-rs\ukiryu/Cargo.toml",
+                          "file:///C:/host/Cargo.toml",
+                          "file://localhost/C:/host/Cargo.toml",
+                          r"C:\host\Cargo.toml", r"\\server\share\Cargo.toml",
+                          "file:///host/Cargo.toml", "../host/Cargo.toml",
+                          "https://example.invalid/schema.json"):
+            snapshot = copy.deepcopy(original)
+            snapshot["files"][schema] = "$ref: %s\n" % reference
+            with self.subTest(reference=reference), self.assertRaises(ukiryu.UkiryuError) as raised:
+                ukiryu.render_cli(argv, platform="linux", env={}, snapshot=snapshot)
+            self.assertEqual(raised.exception.code, "UNSUPPORTED_CAPABILITY")
