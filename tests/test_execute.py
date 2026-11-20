@@ -71,6 +71,23 @@ class Execute(unittest.TestCase):
         self.assertIs(type(result.timeout), float)
         self.assertEqual(result.timeout, 30.5)
 
+    def test_zero_timeout_runs_without_a_deadline(self):
+        # Ruby ab6df353 and the core's executor_data/observations.json:
+        # an explicit integer or Float zero disables the deadline.
+        cat = self.available("cat", "  - name: copy\n")
+        for timeout in (0, 0.0):
+            with self.subTest(timeout=timeout):
+                result = cat.execute("copy", env={}, timeout=timeout, stdin="no deadline\n")
+                self.assertEqual(result.stdout, "no deadline\n")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(result.status, 0)
+                self.assertEqual(result.timeout, timeout)
+                self.assertIs(type(result.timeout), type(timeout))
+                # Ruby metadata compares duration against zero even though
+                # the executor treats zero as no deadline.
+                self.assertIs(result.timed_out, True)
+                self.assertIs(result.success, True)
+
     def test_stream_bytes_that_are_not_utf8_cross_unchanged(self):
         printf = self.available("printf", PRINTF)
         result = printf.execute("emit", {"format": "\\377A\\000"}, env={}, timeout=60)
