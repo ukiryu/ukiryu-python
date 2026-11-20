@@ -140,18 +140,25 @@ class ExecutionResult:
 @dataclass(frozen=True)
 class SchemaStage:
     """How ``DefinitionValidator`` chose its schema: ``given``,
-    ``given_not_loaded``, ``env`` or ``remote_fallback_not_performed``."""
+    ``given_not_loaded``, ``env`` or ``remote_fallback``.
+
+    ``loaded`` records whether a remote fallback returned a schema. Older
+    cores may report ``remote_fallback_not_performed`` without that field.
+    """
 
     kind: str
     path: Optional[str] = None
+    loaded: Optional[bool] = None
 
     @classmethod
     def from_wire(cls, data: Any) -> Optional["SchemaStage"]:
         if data is None:
             return None
-        if not isinstance(data, dict) or "kind" not in data or set(data) - {"kind", "path"}:
+        if (not isinstance(data, dict) or "kind" not in data
+                or set(data) - {"kind", "path", "loaded"}
+                or ("loaded" in data and type(data["loaded"]) is not bool)):
             raise ProtocolError("malformed schema_stage %r" % (data,))
-        return cls(data["kind"], data.get("path"))
+        return cls(data["kind"], data.get("path"), data.get("loaded"))
 
 
 @dataclass(frozen=True)
