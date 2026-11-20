@@ -1,10 +1,16 @@
 """The typed API against the core: values, errors and protocol strictness."""
 
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
+import threading
 import unittest
+from unittest.mock import patch
 
 import ukiryu
 from ukiryu import (BuiltCommand, DefinitionReport, Map, Regexp, Shell, Symbol, Time, Tool,
                     ToolInfo, UkiryuError)
+from ukiryu.errors import ProtocolError
+from ukiryu.models import SchemaStage
 
 DEFINITION = (
     "name: 'demo'\nversion: '1.0'\nprofiles:\n- name: default\n"
@@ -22,6 +28,42 @@ class Version(unittest.TestCase):
         self.assertRegex(version.version, r"^\d+\.\d+\.\d+")
         self.assertEqual(ukiryu.__version__, "0.1.0")
         self.assertEqual(ukiryu.library_info().abi_version, 1)
+
+
+class SchemaDiscovery(unittest.TestCase):
+    def test_remote_stage_preserves_loaded_and_rejects_invalid_types(self):
+        for loaded in (True, False):
+            stage = SchemaStage.from_wire({"kind": "remote_fallback", "loaded": loaded})
+            self.assertIs(stage.loaded, loaded)
+        self.assertIsNone(SchemaStage.from_wire({"kind": "env", "path": "schema.yaml"}).loaded)
+        for loaded in (None, 0, "true"):
+            with self.subTest(loaded=loaded), self.assertRaises(ProtocolError):
+                SchemaStage.from_wire({"kind": "remote_fallback", "loaded": loaded})
+
+    def test_remote_schema_fallback_crosses_the_binding(self):
+        class SchemaHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'type: object\nrequired: [missing_remote_property]\n')
+
+            def log_message(self, *_args):
+                pass
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), SchemaHandler) as server:
+            worker = threading.Thread(target=server.serve_forever)
+            worker.start()
+            try:
+                url = "http://127.0.0.1:%d/schema.yaml" % server.server_port
+                with patch.dict(os.environ, {"UKIRYU_SCHEMA_PATH": "",
+                                             "UKIRYU_REMOTE_SCHEMA_URL": url}):
+                    report = ukiryu.validate_definition(DEFINITION)
+                self.assertEqual(report.schema_stage.kind, "remote_fallback")
+                self.assertIs(report.schema_stage.loaded, True)
+                self.assertTrue(any("missing_remote_property" in error for error in report.errors))
+            finally:
+                server.shutdown()
+                worker.join()
 
 
 class Values(unittest.TestCase):
