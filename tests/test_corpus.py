@@ -44,6 +44,8 @@ DISPATCHED = {
     "resolve.extract_version": 372,
     "resolve.range": 68,
     "resolve.version_spec": 130,
+    "resolve.shell_detect": 17,
+    "cli.run": 21,
     "shell.env_var": 176,
     "shell.escape": 3912,
     "shell.format_path": 40,
@@ -56,19 +58,17 @@ DISPATCHED = {
     "yaml.lutaml_roundtrip": 2,
 }
 
-# Ops this test does not run, with the reason.
-NOT_DISPATCHED = {
-    "resolve.shell_detect": (17, "host shell detection is not on the wire (owner decision D2 open)"),
-    "cli.run": (21, "CLI process rows belong to the CLI binary, not the library API"),
-}
+# Every operation is dispatched. This explicit empty map makes a new exclusion
+# visible to the coverage pin instead of silently shrinking the replay.
+NOT_DISPATCHED = {}
 
 MANIFEST_TOTAL = 14177
 
 # Ops whose rows the R2 rule files judge here, and how many rows they list
-# among them. Other listed rows (the schema and shell detection migrations)
-# are not applied by this test and keep their frozen expectations.
-R2_RULE_OPS = ("lint.string", "yaml.load", "yaml.model_load", "yaml.lutaml_roundtrip")
-R2_RULE_ROWS = 25
+# among them. All other rows keep their frozen expectations.
+R2_RULE_OPS = ("lint.string", "yaml.load", "yaml.model_load", "yaml.lutaml_roundtrip",
+               "resolve.shell_detect")
+R2_RULE_ROWS = 35
 
 
 def corpus_dir() -> Path:
@@ -95,6 +95,22 @@ def host() -> str:
     if sys.platform == "darwin":
         return "macos"
     return "linux"
+
+
+def applicable(row) -> bool:
+    """Only the frozen CLI and shell groups use explicit virtual platforms.
+
+    Any new platform/capability restriction still needs a deliberate runner
+    change. Real process execution remains outside the shared corpus.
+    """
+    platforms = row["applicability"]["platforms"]
+    requires = row["applicability"]["requires"]
+    if row["op"] == "cli.run":
+        return (row["kind"] == "cli-output" and platforms == ["linux"]
+                and requires == ["cli", "process", "fs"])
+    if row["op"] == "resolve.shell_detect":
+        return row["kind"] == "resolve" and platforms == ["linux", "macos"] and requires == []
+    return host() in platforms and requires == []
 
 
 def same(a, b) -> bool:
@@ -145,6 +161,19 @@ class Corpus:
             return Map(tuple((self.scrub(k), self.scrub(v)) for k, v in value.pairs))
         return value
 
+    def cli_snapshot(self):
+        """Caller-owned virtual inputs, shared with the portable core renderer."""
+        if not hasattr(self, "_cli_snapshot"):
+            files = {}
+            for entry in self.manifest["inputs"]:
+                path = self.inputs / entry["path"]
+                if sha256(path) != entry["sha256"]:
+                    raise AssertionError("CLI input digest differs: %s" % entry["path"])
+                files["/snapshot/inputs/" + entry["path"]] = self.read_input(entry["path"])
+            self._cli_snapshot = {"files": files, "executables": {}, "probes": [],
+                                  "definitions": []}
+        return self._cli_snapshot
+
     # One public API call per op; the result in the expectation's shape.
     def run(self, op: str, i):
         if op == "build.args":
@@ -167,6 +196,22 @@ class Corpus:
                 ("valid", report.valid), ("errors", list(report.errors)),
                 ("warnings", list(report.warnings)), ("schema_path", report.schema_path),
                 ("error_count", report.error_count), ("warning_count", report.warning_count))))
+        if op == "resolve.shell_detect":
+            # The corpus captures Unix detection. An explicit virtual Linux
+            # platform replays the same input on Windows without reading ENV.
+            return ukiryu.detect_shell(platform="linux", env=i["env"])
+        if op == "cli.run":
+            argv = [arg.replace("${INPUTS}", "/snapshot/inputs")
+                    .replace("${HOME}", "/snapshot/home") for arg in i["argv"]]
+            result = ukiryu.render_cli(argv, platform="linux", env={
+                "HOME": "/snapshot/home", "SHELL": "/bin/bash", "PATH": "",
+                "TZ": "UTC", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TERM": "dumb",
+                "COLUMNS": "100", "THOR_COLUMNS": "100",
+                "UKIRYU_REGISTER": "/snapshot/inputs/register",
+            }, snapshot=self.cli_snapshot())
+            return {key: value.replace("/snapshot/inputs", "${INPUTS}")
+                    .replace("/snapshot/home", "${HOME}") if isinstance(value, str) else value
+                    for key, value in result.items()}
         if op == "resolve.extract_version":
             return ukiryu.extract_version(decode(i["output"]), i["pattern"])
         if op == "resolve.range":
@@ -359,8 +404,7 @@ class ConformanceCorpus(unittest.TestCase):
             op = row["op"]
             if op not in DISPATCHED:
                 continue
-            self.assertIn(host(), row["applicability"]["platforms"], row["id"])
-            self.assertEqual(row["applicability"]["requires"], [], row["id"])
+            self.assertTrue(applicable(row), row["id"])
             dispatched[op] += 1
             have, detail = self.corpus.outcome(row)
             reason = self.rules.judge(row, have, detail)
@@ -368,7 +412,7 @@ class ConformanceCorpus(unittest.TestCase):
                 failures.append("%s:\n  %s" % (row["id"], reason))
         self.assertEqual(dict(dispatched), DISPATCHED)
         total = sum(dispatched.values())
-        self.assertEqual(total, 14139)
+        self.assertEqual(total, MANIFEST_TOTAL)
         report = os.environ.get("UKIRYU_CORPUS_REPORT")
         if report:
             Path(report).write_text(json.dumps({
