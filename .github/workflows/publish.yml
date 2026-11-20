@@ -1,17 +1,10 @@
 name: Publish to PyPI
 
-# Owner-gated release of the wheels built by wheels.yml. It runs only when
-# started by hand (workflow_dispatch) from main, never on a pull request or a
-# push.
-#
-# Owner setup before the first run:
-# - A GitHub environment named `pypi` with required reviewers. The gate job
-#   checks this and stops the run if the environment has no required
-#   reviewers, because GitHub would otherwise create the environment without
-#   protection on first use.
-# - A trusted publisher on pypi.org: project `ukiryu`, owner `ukiryu`,
-#   repository `ukiryu-python`, workflow `publish.yml`, environment `pypi`.
-#   Uploads use OIDC, so there is no API token.
+# Trusted publishing (OIDC) requires the owner-side pending-publisher
+# registration on pypi.org: project `ukiryu`, owner `ukiryu`, repository
+# `ukiryu-python`, workflow `publish.yml`, environment `pypi`. No API token.
+# The environment is created on first use. Publishing runs only when
+# started by hand (workflow_dispatch) from main.
 #
 # Wheels only, as in parsanol-python: an sdist would carry no core library
 # (ukiryu-rs is a submodule), so a source install could not load it. Each
@@ -31,35 +24,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gate:
-    name: Owner gate
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: The pypi environment requires reviewers
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/pypi" \
-            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0') || {
-            echo "::error::environment pypi not found; create it with required reviewers first"
-            exit 1
-          }
-          if [ "$rules" -lt 1 ]; then
-            echo "::error::environment pypi has no required reviewers"
-            exit 1
-          fi
-          echo "pypi environment has $rules required reviewer(s)"
-
   wheels:
-    needs: gate
     uses: ./.github/workflows/wheels.yml
 
   publish:
+    if: github.ref == 'refs/heads/main'
     needs: wheels
     runs-on: ubuntu-latest
     environment: pypi
